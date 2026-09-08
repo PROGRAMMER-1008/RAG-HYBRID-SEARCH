@@ -1,0 +1,11 @@
+services:
+  rag-api:
+    build: .
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - GROQ_API_KEY=your_groq_key
+      - OLLAMA_HOST=http://host.docker.internal:11434
+    restart: unless-stopped

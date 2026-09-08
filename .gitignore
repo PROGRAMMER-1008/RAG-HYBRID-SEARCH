@@ -1,0 +1,15 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Data (regeneratable via python -m app.ingestion.indexer)
+data/chroma_db/
+data/bm25_index.pkl
+data/eval_results.json
+data/chunking_comparison/
+
+# OS
+.DS_Store
+Thumbs.db

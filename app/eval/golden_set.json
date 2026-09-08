@@ -1,0 +1,110 @@
+[
+  {
+    "id": "q01",
+    "question": "What ROC-AUC does the corruption detector achieve?",
+    "type": "lookup",
+    "golden_answer": "0.681–0.683",
+    "expected_source_file": "corruption_detector_README.md",
+    "expected_heading_contains": "Model Performance",
+    "notes": "Corrected value verified against actual model output, NOT the original README's inflated 0.87+ claim."
+  },
+  {
+    "id": "q02",
+    "question": "What loss function does the brain tumor segmentation model use to handle class imbalance?",
+    "type": "lookup",
+    "golden_answer": "Focal Tversky Loss",
+    "expected_source_file": "brain_tumor_detection_README.md",
+    "expected_heading_contains": "Focal Tversky Loss",
+    "notes": null
+  },
+  {
+    "id": "q03",
+    "question": "What formula does the Delhi Digital Twin use to model traffic congestion?",
+    "type": "lookup",
+    "golden_answer": "The Bureau of Public Roads (BPR) function: t(v) = t0 x (1 + 0.15 x (v/c)^4)",
+    "expected_source_file": "delhi_digital_twin_README.md",
+    "expected_heading_contains": "Traffic Model (BPR)",
+    "notes": null
+  },
+  {
+    "id": "q04",
+    "question": "What Whisper model size was used in the Indic ASR benchmark, and why?",
+    "type": "lookup",
+    "golden_answer": "whisper-tiny, instead of whisper-small/base, because the project was built in a CPU-only, no-persistent-session sandbox where a larger model risked an unacceptably long run.",
+    "expected_source_file": "indic_asr_benchmark_README.md",
+    "expected_heading_contains": "Known limitations",
+    "notes": "Good test of whether the model reproduces the CAVEAT, not just the model name."
+  },
+  {
+    "id": "q05",
+    "question": "How does Failure Forensics perform backward root-cause analysis?",
+    "type": "lookup",
+    "golden_answer": "It walks a trace backward from the final step, using judge scores and self/judge disagreement as evidence, to find the first genuine point of failure and classify it into a failure taxonomy.",
+    "expected_source_file": "failure_forensics_README.md",
+    "expected_heading_contains": "What it does",
+    "notes": "This is the exact chunk-boundary bug we found and fixed during Phase 2 retrieval testing."
+  },
+  {
+    "id": "q06",
+    "question": "Which of these projects use FastAPI?",
+    "type": "multi_hop",
+    "golden_answer": "AI Corruption Pattern Detector, Delhi Digital Twin, and Failure Forensics all use FastAPI. Brain Tumor Detection and Indic ASR Benchmark do not mention FastAPI.",
+    "expected_source_file": "MULTIPLE: corruption_detector_README.md, delhi_digital_twin_README.md, failure_forensics_README.md",
+    "expected_heading_contains": null,
+    "notes": "Tests whether retrieval surfaces chunks from all 3 relevant files, not just the top-ranked one."
+  },
+  {
+    "id": "q07",
+    "question": "Compare the ResNet50 classification accuracy to the corruption detector's ROC-AUC.",
+    "type": "multi_hop",
+    "golden_answer": "ResNet50 classification accuracy is ~98% (brain tumor detection). The corruption detector's ROC-AUC is 0.681-0.683. These are different metrics for different tasks (classification accuracy vs. anomaly-ranking ROC-AUC) and should not be read as directly comparable performance.",
+    "expected_source_file": "MULTIPLE: brain_tumor_detection_README.md, corruption_detector_README.md",
+    "expected_heading_contains": null,
+    "notes": "Tests whether the model appropriately notes these metrics aren't apples-to-apples, rather than just outputting both numbers uncritically."
+  },
+  {
+    "id": "q08",
+    "question": "What is the corruption detector's precision-recall AUC score?",
+    "type": "no_answer",
+    "golden_answer": "NOT ANSWERABLE from the corpus. The corruption detector README reports ROC-AUC (0.681-0.683), not a precision-recall AUC score. The system should say this specific metric isn't in the context, not substitute the ROC-AUC value as if it answers the question asked.",
+    "expected_source_file": null,
+    "expected_heading_contains": null,
+    "notes": "Deliberately similar-sounding to a real fact (ROC-AUC) to test whether the model conflates the two rather than correctly declining."
+  },
+  {
+    "id": "q09",
+    "question": "What programming language was the health diagnostics blood report project written in?",
+    "type": "no_answer",
+    "golden_answer": "NOT ANSWERABLE from the corpus. The blood report / health diagnostics project is not part of this corpus at all.",
+    "expected_source_file": null,
+    "expected_heading_contains": null,
+    "notes": "Tests the 'context doesn't contain this' case for a project that was deliberately excluded from the corpus (see /people conversation on scope)."
+  },
+  {
+    "id": "q10",
+    "question": "How good is the tumor thing at finding tumors?",
+    "type": "ambiguous",
+    "golden_answer": "Classification accuracy ~98% (precision 0.98 / recall 0.96 / F1 0.97) for detecting whether a tumor is present; Tversky score ~0.88 for the ResUNet segmentation model that localizes the tumor pixel-by-pixel.",
+    "expected_source_file": "brain_tumor_detection_README.md",
+    "expected_heading_contains": "Results",
+    "notes": "Deliberately casual phrasing ('the tumor thing') — tests retrieval robustness to informal queries, not just well-formed technical ones."
+  },
+  {
+    "id": "q11",
+    "question": "What's the deal with the Delhi traffic project's zones?",
+    "type": "ambiguous",
+    "golden_answer": "The Delhi Digital Twin covers 12 zones: Connaught Place, Old Delhi, Dwarka, Rohini, Noida Border, Gurugram Border, South Delhi, East Delhi, North Delhi, Janakpuri, Lajpat Nagar, and Nehru Place.",
+    "expected_source_file": "delhi_digital_twin_README.md",
+    "expected_heading_contains": "Delhi Network Coverage",
+    "notes": "Casual phrasing ('what's the deal with') plus doesn't name the project precisely ('Delhi traffic project' vs. 'Delhi Digital Twin')."
+  },
+  {
+    "id": "q12",
+    "question": "What known limitation does Failure Forensics have regarding its judge model?",
+    "type": "lookup",
+    "golden_answer": "The judge runs on the same model class as the pipeline itself (llama3.1:8b reviewing llama3.1:8b), not a stronger reviewer model. Self-reported confidence has been observed to vary between identical runs, and the judge has been caught making a confident diagnosis that didn't match its own numeric score.",
+    "expected_source_file": "failure_forensics_README.md",
+    "expected_heading_contains": "Known limitations",
+    "notes": null
+  }
+]

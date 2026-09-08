@@ -1,0 +1,29 @@
+# --- Core ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+
+# --- Ingestion ---
+pypdf==5.0.1
+markdown-it-py==3.0.0
+beautifulsoup4==4.12.3
+
+# --- Embeddings & Reranking (local, free) ---
+sentence-transformers==3.1.1
+
+# --- Vector store ---
+chromadb==0.5.5
+
+# --- Sparse search ---
+rank-bm25==0.2.2
+
+# --- Generation ---
+ollama==0.3.3
+groq==1.7.0  # was 0.11.0 — too old to support gpt-oss reasoning params, see llm_client.py
+
+# --- Eval ---
+scipy==1.14.1
+
+# --- Utils ---
+python-dotenv==1.0.1
+tqdm==4.66.5
