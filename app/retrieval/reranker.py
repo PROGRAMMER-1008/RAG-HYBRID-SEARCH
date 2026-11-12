@@ -14,8 +14,6 @@ only care about relative ordering, not its absolute scale.
 
 from dataclasses import dataclass
 
-from sentence_transformers import CrossEncoder
-
 from app.config import RERANK_TOP_N, RERANKER_MODEL
 from app.retrieval.fusion import FusedResult
 
@@ -34,7 +32,11 @@ class RerankedResult:
 
 class Reranker:
     def __init__(self, model=None):
-        self.model = model or CrossEncoder(RERANKER_MODEL)
+        if model is None:
+            from sentence_transformers import CrossEncoder
+
+            model = CrossEncoder(RERANKER_MODEL)
+        self.model = model
 
     def rerank(self, query: str, candidates: list[FusedResult], top_n: int = RERANK_TOP_N) -> list[RerankedResult]:
         if not candidates:

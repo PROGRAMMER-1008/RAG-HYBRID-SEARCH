@@ -38,6 +38,7 @@ from app.ingestion.loader import (
     supported_extensions,
 )
 from app.retrieval.pipeline import HybridRetrievalPipeline
+from app.retrieval.embedding import FastEmbedEncoder
 from app.retrieval.workspace import WorkspacePipeline
 from app.api.middleware import RequestBodyLimitMiddleware
 from app.api.workspaces import Workspace, WorkspaceStore
@@ -74,14 +75,17 @@ def _get_models():
         return _embedding_model, _reranker_model
     with _model_lock:
         if _embedding_model is None:
-            from sentence_transformers import CrossEncoder, SentenceTransformer
-
             try:
-                embedding = SentenceTransformer(settings.embedding_model, device="cpu")
-                reranker = (
-                    CrossEncoder(settings.reranker_model, device="cpu")
-                    if settings.enable_reranker else None
+                embedding = FastEmbedEncoder(
+                    settings.embedding_model,
+                    cache_dir=settings.fastembed_cache_dir,
+                    threads=1,
                 )
+                reranker = None
+                if settings.enable_reranker:
+                    from sentence_transformers import CrossEncoder
+
+                    reranker = CrossEncoder(settings.reranker_model, device="cpu")
             except Exception as exc:
                 _log_failure("Failed to load retrieval models.", exc)
                 raise RuntimeError("Retrieval models could not be loaded. Check model access and backend memory.") from exc

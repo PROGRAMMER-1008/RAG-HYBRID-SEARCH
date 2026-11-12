@@ -33,8 +33,9 @@ class Settings(BaseModel):
     ollama_timeout_seconds: float = 90.0
 
     embedding_model: str = "BAAI/bge-small-en-v1.5"
+    fastembed_cache_dir: Path = Path(tempfile.gettempdir()) / "fastembed"
     reranker_model: str = "BAAI/bge-reranker-base"
-    enable_reranker: bool = True
+    enable_reranker: bool = False
     enable_citation_verification: bool = True
     enable_ocr: bool = True
 

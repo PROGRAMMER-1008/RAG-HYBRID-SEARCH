@@ -1,3 +1,4 @@
 # Full local-development dependencies, including optional persistent Chroma indexes.
 -r requirements-runtime.txt
 chromadb==0.5.5
+sentence-transformers==3.1.1

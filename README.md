@@ -9,7 +9,7 @@ An open-ended document question answering workbench. Upload files or a project f
 - Uses BGE dense retrieval, BM25 lexical retrieval, reciprocal rank fusion, and an optional BGE cross-encoder reranker.
 - Answers document questions from retrieved passages, shows excerpts and pipeline rankings, and withholds answers that have no usable citations or whose cited claims fail automated verification.
 - Offers a separate general AI mode for questions that do not depend on uploaded files. It does not browse the web.
-- Gives each browser session a random workspace ID and bearer token. Workspaces are process-local, expire after 45 minutes of inactivity by default, and disappear on service restart. Uploaded bytes are deleted after extraction; extracted text is held in memory until the workspace expires or is cleared.
+- Gives each browser session a random workspace ID and bearer token. Workspaces are process-local, expire after 45 minutes of inactivity locally (30 minutes on Render Free), and disappear on service restart. Uploaded bytes are deleted after extraction; extracted text is held in memory until the workspace expires or is cleared.
 - Includes per-file, per-workspace, per-session, daily, and per-minute limits intended for a small public demo.
 
 Uploaded document text and questions are sent to the configured generation provider. In grounded mode, cited claims may also be sent to the configured judge provider. Do not upload confidential files unless you have permission to send them to those providers.
@@ -27,13 +27,13 @@ Copy-Item .env.example .env
 
 The default provider is Ollama. Start Ollama separately and pull the configured model, or edit `.env` to use Groq and set `GROQ_API_KEY` in that file. Keep `.env` out of Git.
 
-`requirements-dev.txt` installs the upload API and test tooling. Install `requirements.txt` as well only if you use the optional local persistent-index command; it adds ChromaDB for that legacy workflow.
+`requirements-dev.txt` installs the upload API and test tooling. Install `requirements.txt` as well only if you need the optional local cross-encoder or persistent-index command; it adds Sentence Transformers and ChromaDB for those local workflows.
 
 ```powershell
 uvicorn app.api.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
-Open <http://127.0.0.1:8001>. The server downloads the embedding and reranker models from Hugging Face the first time you upload a document. You can also build the optional built-in corpus index with `python -m app.ingestion.indexer`.
+Open <http://127.0.0.1:8001>. The server downloads the compact BGE embedding model from Hugging Face the first time you upload a document. The cross-encoder reranker is disabled by default; enable it only after installing the full local requirements. You can also build the optional built-in corpus index with `python -m app.ingestion.indexer`.
 
 To run the web build separately:
 
@@ -46,7 +46,7 @@ npm run build
 
 The live API returns the exact formats and active limits from `GET /v1/formats`. Common formats include PDF, DOCX, PPTX, XLSX/XLSM, CSV/TSV, EML, images (PNG, JPEG, TIFF, BMP, WEBP), HTML, Markdown, JSON/JSONL, XML, Jupyter notebooks, and source/configuration text. Legacy `.doc` and `.xls` files are not supported; convert them to Open XML formats. ZIP archives are not unpacked. A folder can be selected in supported browsers, or files can be selected and dropped individually.
 
-Local defaults allow 15 MiB per file, 50 MiB total per workspace, 100 files, 5,000 chunks, 3 active workspaces, and 10 questions per workspace. The Render Blueprint uses a smaller 25 MiB total workspace cap and 2,500 chunks to fit its configured instance. Limits can be changed with environment variables, but raise them only after reviewing memory and request costs.
+Local defaults allow 15 MiB per file, 50 MiB total per workspace, 100 files, 5,000 chunks, 3 active workspaces, and 10 questions per workspace. Render Free limits uploads to 5 MiB per file, 10 MiB per workspace, 25 files, 1,500 chunks, 2 active workspaces, and 5 questions per workspace to fit its 512 MB/0.1 CPU service. Limits can be changed with environment variables, but raise them only after reviewing memory and request costs.
 
 OCR of scanned PDFs and images requires the Tesseract executable. OCR and document parsers are bounded by page, image, archive, row, and file-size limits. A parser error is returned per file; secret-like content and common credential files are rejected without echoing the detected value.
 
@@ -64,7 +64,7 @@ The older `/v1/ask` endpoint remains available for a locally built shared index.
 
 ## Deploy: Vercel frontend + Render API
 
-The repository is prepared for a static Vercel frontend and a Docker-based Render API. The Render service serves the UI too, so the backend remains usable on its own. The Render Docker build installs `requirements-runtime.txt`; the upload API uses an in-memory NumPy dense index and does not install ChromaDB.
+The repository is prepared for a static Vercel frontend and a Docker-based Render API. The Render service serves the UI too, so the backend remains usable on its own. The Render Docker build installs `requirements-runtime.txt`; the upload API uses FastEmbed's CPU-only ONNX encoder, an in-memory NumPy dense index, and does not install PyTorch or ChromaDB. The full local development requirements keep Sentence Transformers for optional cross-encoder reranking and legacy persistent indexes.
 
 ### Vercel
 
@@ -74,7 +74,9 @@ The static project uses security headers from `web/vercel.json`. The frontend ca
 
 ### Render
 
-`render.yaml` defines one public Docker web service in Singapore on the `1c-2g` plan, with a `/v1/health` health check. It keeps uploaded workspaces in memory and temporary files under `/tmp`; no persistent disk is required. The API image includes Tesseract and runs as a non-root user.
+`render.yaml` defines one public Docker web service in Singapore on Render's free plan, with a `/v1/health` health check. The API uses a small quantized BGE model through ONNX and disables the cross-encoder to fit the free service's resource limits. It keeps uploaded workspaces in memory and temporary files under `/tmp`; no persistent disk is required. The API image includes Tesseract and runs as a non-root user.
+
+Free-tier tradeoffs are deliberate: Render provides 512 MB RAM and 0.1 CPU, sleeps after 15 minutes without traffic, and erases the temporary filesystem on sleep/restart/redeploy. The next request can take about a minute to wake it. Uploaded workspaces are intentionally temporary and may also disappear on a free-instance restart. Upload, OCR, chunk, workspace, and question limits are lower in `render.yaml` than local defaults. Vercel Hobby is free for personal, non-commercial projects; check its current plan terms if the use changes.
 
 Set `GROQ_API_KEY` in the Render Dashboard as a secret before using AI modes. The Blueprint defaults both generation and citation checking to Groq. Never commit an API key. Confirm your Groq account has an appropriate usage limit; the app's in-memory request limits are only a demo guard and reset when the service restarts.
 

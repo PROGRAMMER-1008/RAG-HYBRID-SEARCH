@@ -8,6 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     MKL_NUM_THREADS=1 \
     HF_HUB_DISABLE_TELEMETRY=1 \
     HF_HOME=/tmp/huggingface \
+    FASTEMBED_CACHE_DIR=/opt/fastembed \
     PORT=8001
 
 WORKDIR /app
@@ -21,12 +22,13 @@ RUN apt-get update \
 ARG DEPENDENCY_FILE=requirements-runtime.txt
 COPY requirements.txt requirements-runtime.txt ./
 RUN pip install --no-cache-dir -r "${DEPENDENCY_FILE}"
+RUN python -c "from fastembed import TextEmbedding; TextEmbedding(model_name='BAAI/bge-small-en-v1.5', cache_dir='/opt/fastembed', threads=1, cuda=False)"
 
 COPY app/ ./app/
 COPY web/ ./web/
 
-RUN mkdir -p /app/data /tmp/rag-workspaces /tmp/huggingface \
-    && chown -R app:app /app/data /tmp/rag-workspaces /tmp/huggingface
+RUN mkdir -p /app/data /tmp/rag-workspaces /tmp/huggingface /opt/fastembed \
+    && chown -R app:app /app/data /tmp/rag-workspaces /tmp/huggingface /opt/fastembed
 USER app
 
 EXPOSE 8001
