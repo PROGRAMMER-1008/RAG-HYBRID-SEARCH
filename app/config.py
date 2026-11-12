@@ -1,66 +1,138 @@
-"""
-Central config for the whole pipeline.
+"""Typed, environment-driven application configuration."""
 
-Why this file exists: every "why did you choose X" interview question
-should have an answer traceable to a single tunable constant here,
-not a magic number buried in some function three folders deep.
-"""
+from __future__ import annotations
+
 import logging
-logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.ERROR)
+import os
+import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
-# --- Paths ---
+from dotenv import load_dotenv
+from pydantic import BaseModel, ConfigDict, SecretStr, field_validator
+
+logging.getLogger("chromadb.telemetry.product.posthog").setLevel(logging.ERROR)
+
+
+class Settings(BaseModel):
+    """Settings shared by the API, ingestion CLI, and deployment."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    app_env: str = "development"
+    generation_provider: str = "ollama"
+    judge_provider: str = "ollama"
+    groq_api_key: SecretStr | None = None
+    groq_model: str = "openai/gpt-oss-120b"
+    groq_timeout_seconds: float = 30.0
+    max_answer_tokens: int = 1024
+    max_judge_tokens: int = 256
+    max_citation_checks_per_answer: int = 8
+    ollama_host: str = "http://127.0.0.1:11434"
+    ollama_model: str = "llama3.1:8b"
+    ollama_timeout_seconds: float = 90.0
+
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
+    reranker_model: str = "BAAI/bge-reranker-base"
+    enable_reranker: bool = True
+    enable_citation_verification: bool = True
+    enable_ocr: bool = True
+
+    max_upload_file_bytes: int = 15 * 1024 * 1024
+    max_workspace_bytes: int = 50 * 1024 * 1024
+    max_upload_request_bytes: int = 60 * 1024 * 1024
+    max_files_per_workspace: int = 100
+    max_pages_per_file: int = 500
+    max_ocr_pages_per_file: int = 30
+    max_chunks_per_workspace: int = 5000
+    max_active_workspaces: int = 3
+    workspace_ttl_minutes: int = 45
+    max_question_chars: int = 4000
+    max_questions_per_workspace: int = 10
+    max_daily_questions: int = 25
+    max_requests_per_minute: int = 20
+
+    cors_origins: str = "http://localhost:5173,http://localhost:8001"
+    workspace_root: Path = Path(tempfile.gettempdir()) / "rag-workspaces"
+    trusted_hosts: str = "localhost,127.0.0.1,testserver"
+
+    @classmethod
+    def from_environment(cls) -> "Settings":
+        """Load .env locally, then validate typed values from the environment."""
+        load_dotenv(override=False)
+        values = {
+            name: os.environ[name.upper()]
+            for name in cls.model_fields
+            if name.upper() in os.environ
+        }
+        return cls(**values)
+
+    @field_validator("generation_provider", "judge_provider")
+    @classmethod
+    def validate_provider(cls, value: str) -> str:
+        value = value.strip().lower()
+        if value not in {"groq", "ollama"}:
+            raise ValueError("Provider must be 'groq' or 'ollama'.")
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def validate_cors_origins(cls, value: str) -> str:
+        origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
+        for origin in origins:
+            parsed = urlsplit(origin)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                    or parsed.username or parsed.password or parsed.path or parsed.query or parsed.fragment
+                    or "*" in parsed.netloc):
+                raise ValueError("CORS_ORIGINS must be a comma-separated list of exact HTTP(S) origins.")
+        return ",".join(origins)
+
+    @field_validator("trusted_hosts")
+    @classmethod
+    def validate_trusted_hosts(cls, value: str) -> str:
+        hosts = [host.strip().lower() for host in value.split(",") if host.strip()]
+        if any("/" in host or "*" in host and not host.startswith("*.") for host in hosts):
+            raise ValueError("TRUSTED_HOSTS permits exact hostnames and leading '*.' wildcards only.")
+        if not hosts:
+            raise ValueError("TRUSTED_HOSTS must include at least one hostname.")
+        return ",".join(hosts)
+
+    @field_validator("max_answer_tokens", "max_judge_tokens", "max_citation_checks_per_answer",
+                     "max_upload_file_bytes", "max_workspace_bytes", "max_upload_request_bytes", "max_files_per_workspace",
+                     "max_pages_per_file", "max_ocr_pages_per_file", "max_chunks_per_workspace", "max_active_workspaces",
+                     "workspace_ttl_minutes", "max_question_chars", "max_questions_per_workspace",
+                     "max_daily_questions", "max_requests_per_minute")
+    @classmethod
+    def positive_limits(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("Resource limits must be positive integers.")
+        return value
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [origin.strip().rstrip("/") for origin in self.cors_origins.split(",") if origin.strip()]
+
+
+settings = Settings.from_environment()
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 RAW_DOCS_DIR = BASE_DIR / "data" / "raw"
 CHROMA_DIR = BASE_DIR / "data" / "chroma_db"
+INDEX_MANIFEST_PATH = BASE_DIR / "data" / "index_manifest.json"
 GOLDEN_SET_PATH = BASE_DIR / "app" / "eval" / "golden_set.json"
 
-# --- Embeddings ---
-# bge-small-en-v1.5: 384-dim, free, local, outperforms MiniLM on MTEB retrieval.
-EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
-# bge models are trained with an asymmetric instruction prefix for queries
-# (not for the documents being indexed) — this measurably improves retrieval.
+EMBEDDING_MODEL = settings.embedding_model
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
-
-# --- Chunking ---
-CHUNK_SIZE = 500          # characters, tuned in Phase 1
-CHUNK_OVERLAP = 50
-
-# --- Retrieval ---
-DENSE_TOP_K = 10
-SPARSE_TOP_K = 10
-RRF_K = 60                # standard RRF damping constant
-FUSION_TOP_N = 20         # candidates passed into reranker
-RERANK_TOP_N = 5          # final chunks passed to the LLM
-
-# --- Reranker ---
-RERANKER_MODEL = "BAAI/bge-reranker-base"
-
-# --- Generation ---
-# Local dev default. Swap to Groq for the hosted portfolio demo.
-GENERATION_PROVIDER = "ollama"   # "ollama" | "groq"
-OLLAMA_MODEL = "llama3.1:8b"
-# NOTE: Groq deprecated llama-3.3-70b-versatile on 2026-06-17 and shut it
-# down on 2026-08-16. openai/gpt-oss-120b is Groq's own recommended
-# successor as of this writing. Groq model availability changes over
-# time — if this model is also gone by the time you read this, check
-# https://console.groq.com/docs/models for the current list before
-# assuming the code is broken.
-GROQ_MODEL = "openai/gpt-oss-120b"
-
-# --- Judge (citation verification + eval correctness scoring) ---
-# Deliberately a SEPARATE knob from GENERATION_PROVIDER, not the same
-# setting reused. EVAL_FINDINGS.md documents a real failure: when the
-# judge is the same small model that generated the answer (llama3.1:8b
-# judging llama3.1:8b), it can get an easy call wrong — a run 4 case
-# (q02) scored a plainly-correct citation as UNSUPPORTED. Defaulting
-# the judge to Groq's larger model, independent of whatever generates
-# the answer, is the fix: a stronger, separate reviewer catches errors
-# a same-class self-judge misses. This mirrors the guide's Project 2
-# "async quality verification loop" pattern — route verification to
-# the highest-tier model available, not necessarily the same one that
-# produced the output being checked.
-JUDGE_PROVIDER = "groq"   # "ollama" | "groq" — independent of GENERATION_PROVIDER
-
-# --- Vector store collection name ---
+CHUNK_SIZE = 700
+CHUNK_OVERLAP = 100
+DENSE_TOP_K = 12
+SPARSE_TOP_K = 12
+RRF_K = 60
+FUSION_TOP_N = 24
+RERANK_TOP_N = 6
+RERANKER_MODEL = settings.reranker_model
+GENERATION_PROVIDER = settings.generation_provider
+JUDGE_PROVIDER = settings.judge_provider
+GROQ_MODEL = settings.groq_model
+OLLAMA_MODEL = settings.ollama_model
 COLLECTION_NAME = "hybrid_rag_docs"

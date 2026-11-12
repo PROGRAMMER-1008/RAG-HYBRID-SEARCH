@@ -1,0 +1,63 @@
+services:
+  - type: web
+    name: rag-hybrid-search-api
+    runtime: docker
+    plan: 1c-2g
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /v1/health
+    maxShutdownDelaySeconds: 60
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: GENERATION_PROVIDER
+        value: groq
+      - key: JUDGE_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_TIMEOUT_SECONDS
+        value: "45"
+      - key: MAX_ANSWER_TOKENS
+        value: "1024"
+      - key: MAX_JUDGE_TOKENS
+        value: "256"
+      - key: MAX_CITATION_CHECKS_PER_ANSWER
+        value: "8"
+      - key: ENABLE_RERANKER
+        value: "true"
+      - key: ENABLE_CITATION_VERIFICATION
+        value: "true"
+      - key: ENABLE_OCR
+        value: "true"
+      - key: CORS_ORIGINS
+        value: https://rag-hybrid-search.vercel.app
+      - key: TRUSTED_HOSTS
+        value: "*.onrender.com,localhost,127.0.0.1"
+      - key: MAX_UPLOAD_FILE_BYTES
+        value: "15728640"
+      - key: MAX_WORKSPACE_BYTES
+        value: "26214400"
+      - key: MAX_UPLOAD_REQUEST_BYTES
+        value: "31457280"
+      - key: MAX_FILES_PER_WORKSPACE
+        value: "100"
+      - key: MAX_PAGES_PER_FILE
+        value: "300"
+      - key: MAX_OCR_PAGES_PER_FILE
+        value: "5"
+      - key: MAX_CHUNKS_PER_WORKSPACE
+        value: "2500"
+      - key: MAX_ACTIVE_WORKSPACES
+        value: "3"
+      - key: WORKSPACE_TTL_MINUTES
+        value: "45"
+      - key: MAX_QUESTIONS_PER_WORKSPACE
+        value: "10"
+      - key: MAX_DAILY_QUESTIONS
+        value: "25"
+      - key: MAX_REQUESTS_PER_MINUTE
+        value: "20"

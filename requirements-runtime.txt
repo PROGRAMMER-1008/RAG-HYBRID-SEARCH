@@ -1,0 +1,30 @@
+# Dependencies used by the public upload-and-query API. ChromaDB is kept out
+# of this file because user workspaces use the in-memory NumPy index.
+fastapi==0.162.4
+uvicorn[standard]==0.54.0
+pydantic==2.14.3
+python-multipart==0.0.33
+
+# Document extraction
+pypdf==7.0.1
+beautifulsoup4==4.15.0
+python-docx==1.2.0
+python-pptx==1.0.2
+openpyxl==3.1.5
+Pillow==13.0.0
+pytesseract==0.3.13
+pypdfium2==5.13.0
+defusedxml==0.7.1
+
+# Retrieval and local CPU models
+sentence-transformers==3.1.1
+rank-bm25==0.2.2
+
+# LLM providers
+ollama==0.3.3
+groq==1.7.0
+
+# Utilities
+python-dotenv==1.0.1
+tqdm==4.66.5
+numpy==1.26.4

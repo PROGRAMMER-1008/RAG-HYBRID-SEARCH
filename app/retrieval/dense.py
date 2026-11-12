@@ -13,10 +13,8 @@ place rather than left to whoever calls this function to remember.
 """
 
 from dataclasses import dataclass
-
-import chromadb
-from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+import json
+import re
 
 from app.config import (
     BGE_QUERY_PREFIX,
@@ -24,6 +22,7 @@ from app.config import (
     COLLECTION_NAME,
     DENSE_TOP_K,
     EMBEDDING_MODEL,
+    INDEX_MANIFEST_PATH,
 )
 
 
@@ -37,7 +36,7 @@ class DenseResult:
 
 
 class DenseRetriever:
-    def __init__(self, chroma_dir=None, collection_name=None):
+    def __init__(self, chroma_dir=None, collection_name=None, model=None):
         # Defaults preserve exact original behavior for every existing
         # caller. Explicit overrides exist so the Phase 4 chunking
         # comparison (chunking_comparison.py) can point at an isolated
@@ -45,12 +44,28 @@ class DenseRetriever:
         # the correct fix; module-attribute reassignment doesn't work
         # here because CHROMA_DIR/COLLECTION_NAME are bound to local
         # names at import time via `from app.config import ...`.
-        self.model = SentenceTransformer(EMBEDDING_MODEL)
+        import chromadb
+        from chromadb.config import Settings
+
+        if model is None:
+            from sentence_transformers import SentenceTransformer
+
+            model = SentenceTransformer(EMBEDDING_MODEL)
+        self.model = model
         client = chromadb.PersistentClient(
             path=str(chroma_dir or CHROMA_DIR),
             settings=Settings(anonymized_telemetry=False),
         )
-        self.collection = client.get_collection(collection_name or COLLECTION_NAME)
+        selected_collection = collection_name
+        if selected_collection is None and INDEX_MANIFEST_PATH.exists():
+            try:
+                manifest = json.loads(INDEX_MANIFEST_PATH.read_text(encoding="utf-8"))
+                selected_collection = manifest["collection_name"]
+            except (json.JSONDecodeError, KeyError, TypeError) as exc:
+                raise ValueError("The active index manifest is malformed. Rebuild the index.") from exc
+            if not isinstance(selected_collection, str) or not re.fullmatch(r"[A-Za-z0-9_-]{3,120}", selected_collection):
+                raise ValueError("The active index manifest contains an invalid collection name.")
+        self.collection = client.get_collection(selected_collection or COLLECTION_NAME)
 
     def search(self, query: str, top_k: int = DENSE_TOP_K) -> list[DenseResult]:
         # The one line that matters most in this file: prefix applied

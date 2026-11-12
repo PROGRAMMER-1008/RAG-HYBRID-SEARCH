@@ -12,8 +12,8 @@ What it does, in order:
     2. Embed every chunk with bge-small-en-v1.5 (NO query prefix — see note below)
     3. Deduplicate near-identical chunks (dedup.py)
     4. Write surviving chunks + embeddings into ChromaDB (dense index)
-    5. Build a BM25 index over the same surviving chunks' raw text (sparse index),
-       and persist it to disk with pickle since BM25 has no native persistence
+    5. Build a BM25 index over the same surviving chunks and persist its
+       tokenized source data as JSON, then atomically switch the active manifest
 
 IMPORTANT bge asymmetry: documents being indexed get embedded RAW, with no
 instruction prefix. Only user QUERIES get the BGE_QUERY_PREFIX prepended,
@@ -22,24 +22,29 @@ backwards silently degrades retrieval quality without erroring — there's
 no crash to warn you, so this comment is the warning.
 """
 
-import pickle
+import json
+import os
+import uuid
+from dataclasses import asdict
+from datetime import datetime, timezone
 
 import chromadb
 from chromadb.config import Settings
-from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 
 from app.config import (
     CHROMA_DIR,
     COLLECTION_NAME,
     EMBEDDING_MODEL,
+    INDEX_MANIFEST_PATH,
     RAW_DOCS_DIR,
 )
 from app.ingestion.chunker import chunk_corpus
 from app.ingestion.dedup import deduplicate
 from app.ingestion.loader import load_corpus
+from app.retrieval.tokenize import tokenize_technical_text
 
-BM25_INDEX_PATH = CHROMA_DIR.parent / "bm25_index.pkl"
+BM25_INDEX_PATH = CHROMA_DIR.parent / "bm25_index.json"
 
 
 def build_indexes(chunks=None, chroma_dir=None, bm25_path=None, collection_name=None, quiet=False):
@@ -51,11 +56,13 @@ def build_indexes(chunks=None, chroma_dir=None, bm25_path=None, collection_name=
     chunks too, instead of forking a second copy of it. Calling with no
     arguments preserves the original production behavior exactly:
     load the real corpus, chunk it with the production (structure-aware)
-    chunker, and write to the real CHROMA_DIR/BM25_INDEX_PATH.
+    chunker, and write a versioned dense+sparse index under the real data directory.
     """
+    is_default_index = chunks is None and chroma_dir is None and bm25_path is None and collection_name is None
+    index_version = uuid.uuid4().hex[:12]
     _chroma_dir = chroma_dir or CHROMA_DIR
-    _bm25_path = bm25_path or BM25_INDEX_PATH
-    _collection_name = collection_name or COLLECTION_NAME
+    _bm25_path = bm25_path or (CHROMA_DIR.parent / f"bm25_index-{index_version}.json" if is_default_index else BM25_INDEX_PATH)
+    _collection_name = collection_name or (f"{COLLECTION_NAME}_{index_version}" if is_default_index else COLLECTION_NAME)
 
     def log(msg):
         if not quiet:
@@ -73,8 +80,11 @@ def build_indexes(chunks=None, chroma_dir=None, bm25_path=None, collection_name=
     model = SentenceTransformer(EMBEDDING_MODEL)
 
     log("Embedding chunks (no query prefix — these are documents, not queries)...")
-    texts = [c.text for c in chunks]
-    embeddings = model.encode(texts, show_progress_bar=not quiet, normalize_embeddings=True)
+    indexed_texts = [
+        f"Document: {chunk.source_file}\nSection: {chunk.heading_path}\n{chunk.text}"
+        for chunk in chunks
+    ]
+    embeddings = model.encode(indexed_texts, show_progress_bar=not quiet, normalize_embeddings=True)
 
     log("Deduplicating...")
     result = deduplicate(chunks, list(embeddings))
@@ -88,10 +98,6 @@ def build_indexes(chunks=None, chroma_dir=None, bm25_path=None, collection_name=
         path=str(_chroma_dir),
         settings=Settings(anonymized_telemetry=False),
     )
-    try:
-        client.delete_collection(_collection_name)
-    except Exception:
-        pass
     collection = client.create_collection(_collection_name, metadata={"hnsw:space": "cosine"})
 
     collection.add(
@@ -110,12 +116,39 @@ def build_indexes(chunks=None, chroma_dir=None, bm25_path=None, collection_name=
     log(f"  {collection.count()} chunks indexed in ChromaDB")
 
     log(f"Building BM25 index...")
-    tokenized = [c.text.lower().split() for c in result.kept_chunks]
-    bm25 = BM25Okapi(tokenized)
-
-    with open(_bm25_path, "wb") as f:
-        pickle.dump({"bm25": bm25, "chunks": result.kept_chunks}, f)
+    tokenized = [
+        tokenize_technical_text(f"Document: {chunk.source_file}\nSection: {chunk.heading_path}\n{chunk.text}")
+        for chunk in result.kept_chunks
+    ]
+    if not any(tokenized):
+        raise ValueError("The corpus contains no searchable words. Add text documents and rebuild the index.")
+    index_payload = {
+        "format_version": 1,
+        "documents": [
+            {"chunk": asdict(chunk), "tokens": tokens}
+            for chunk, tokens in zip(result.kept_chunks, tokenized)
+        ],
+    }
+    _bm25_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_sparse_path = _bm25_path.with_name(f"{_bm25_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary_sparse_path.write_text(json.dumps(index_payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary_sparse_path, _bm25_path)
     log(f"  BM25 index persisted to {_bm25_path}")
+
+    if is_default_index:
+        manifest = {
+            "format_version": 1,
+            "version": index_version,
+            "collection_name": _collection_name,
+            "bm25_path": _bm25_path.name,
+            "embedding_model": EMBEDDING_MODEL,
+            "chunk_count": len(result.kept_chunks),
+            "built_at": datetime.now(timezone.utc).isoformat(),
+        }
+        temporary_manifest_path = INDEX_MANIFEST_PATH.with_name(f"{INDEX_MANIFEST_PATH.name}.{uuid.uuid4().hex}.tmp")
+        temporary_manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+        os.replace(temporary_manifest_path, INDEX_MANIFEST_PATH)
+        log(f"  Active index switched atomically to version {index_version}")
 
     log(f"\nDone. Both indexes built over the same {len(result.kept_chunks)} chunks.")
     return result

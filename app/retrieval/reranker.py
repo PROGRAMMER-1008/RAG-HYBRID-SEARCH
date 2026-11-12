@@ -33,8 +33,8 @@ class RerankedResult:
 
 
 class Reranker:
-    def __init__(self):
-        self.model = CrossEncoder(RERANKER_MODEL)
+    def __init__(self, model=None):
+        self.model = model or CrossEncoder(RERANKER_MODEL)
 
     def rerank(self, query: str, candidates: list[FusedResult], top_n: int = RERANK_TOP_N) -> list[RerankedResult]:
         if not candidates:

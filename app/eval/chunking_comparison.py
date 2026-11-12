@@ -3,7 +3,7 @@ Phase 4: Chunking strategy comparison.
 
 Job: build three separate indexes — the production structure-aware
 chunker, a fixed-size baseline, and a semantic (embedding-boundary)
-strategy — over ISOLATED ChromaDB collections and BM25 pickles (never
+strategy — over ISOLATED ChromaDB collections and BM25 JSON indexes (never
 touching the real production index), then run the same golden eval
 suite against each and report retrieval-hit-rate and citation-accuracy
 side by side. This is what turns "structure-aware chunking is the
@@ -94,7 +94,7 @@ def run_comparison():
     build_indexes(
         chunks=structure_chunks,
         chroma_dir=COMPARISON_DIR / "structure_aware_chroma",
-        bm25_path=COMPARISON_DIR / "structure_aware_bm25.pkl",
+        bm25_path=COMPARISON_DIR / "structure_aware_bm25.json",
         collection_name="cmp_structure_aware",
     )
 
@@ -104,7 +104,7 @@ def run_comparison():
     build_indexes(
         chunks=fixed_chunks,
         chroma_dir=COMPARISON_DIR / "fixed_size_chroma",
-        bm25_path=COMPARISON_DIR / "fixed_size_bm25.pkl",
+        bm25_path=COMPARISON_DIR / "fixed_size_bm25.json",
         collection_name="cmp_fixed_size",
     )
 
@@ -116,19 +116,19 @@ def run_comparison():
     build_indexes(
         chunks=semantic_chunks,
         chroma_dir=COMPARISON_DIR / "semantic_chroma",
-        bm25_path=COMPARISON_DIR / "semantic_bm25.pkl",
+        bm25_path=COMPARISON_DIR / "semantic_bm25.json",
         collection_name="cmp_semantic",
     )
 
     print("\n=== Running golden eval suite against each strategy ===")
     results.append(_run_eval_against_index(
-        COMPARISON_DIR / "structure_aware_chroma", COMPARISON_DIR / "structure_aware_bm25.pkl",
+        COMPARISON_DIR / "structure_aware_chroma", COMPARISON_DIR / "structure_aware_bm25.json",
         "cmp_structure_aware", "structure_aware"))
     results.append(_run_eval_against_index(
-        COMPARISON_DIR / "fixed_size_chroma", COMPARISON_DIR / "fixed_size_bm25.pkl",
+        COMPARISON_DIR / "fixed_size_chroma", COMPARISON_DIR / "fixed_size_bm25.json",
         "cmp_fixed_size", "fixed_size"))
     results.append(_run_eval_against_index(
-        COMPARISON_DIR / "semantic_chroma", COMPARISON_DIR / "semantic_bm25.pkl",
+        COMPARISON_DIR / "semantic_chroma", COMPARISON_DIR / "semantic_bm25.json",
         "cmp_semantic", "semantic"))
 
     print("\n" + "=" * 70)

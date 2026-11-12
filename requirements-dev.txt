@@ -1,0 +1,6 @@
+-r requirements-runtime.txt
+
+pytest==8.3.5
+httpx==0.28.1
+ruff==0.9.9
+pip-audit==2.10.1

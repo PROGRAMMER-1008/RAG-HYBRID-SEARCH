@@ -43,11 +43,16 @@ class RetrievalTrace:
 
 
 class HybridRetrievalPipeline:
-    def __init__(self, chroma_dir=None, collection_name=None, bm25_path=None):
+    def __init__(self, chroma_dir=None, collection_name=None, bm25_path=None,
+                 embedding_model=None, reranker_model=None):
         print("Loading retrieval pipeline (embedding model, indexes, reranker)...")
-        self.dense = DenseRetriever(chroma_dir=chroma_dir, collection_name=collection_name)
+        self.dense = DenseRetriever(
+            chroma_dir=chroma_dir,
+            collection_name=collection_name,
+            model=embedding_model,
+        )
         self.sparse = SparseRetriever(bm25_path=bm25_path)
-        self.reranker = Reranker()
+        self.reranker = Reranker(model=reranker_model)
         print("Pipeline ready.")
 
     def retrieve(self, query: str) -> RetrievalTrace:

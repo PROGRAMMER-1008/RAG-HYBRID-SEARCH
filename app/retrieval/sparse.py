@@ -1,19 +1,18 @@
-"""
-Phase 2b: Sparse retrieval.
+"""Sparse retrieval backed by a safe JSON corpus, never executable pickle."""
 
-Job: given a user question, tokenize it the same way the index was
-built (lowercase + whitespace split) and query the persisted BM25
-index for the top-k chunks by BM25 score.
+from __future__ import annotations
 
-No embedding model needed here at all — this is why it's testable
-without Hub/network access, unlike dense.py.
-"""
-
-import pickle
+import json
 from dataclasses import dataclass
+from pathlib import Path
 
-from app.config import SPARSE_TOP_K
-from app.ingestion.indexer import BM25_INDEX_PATH
+from rank_bm25 import BM25Okapi
+
+from app.config import CHROMA_DIR, INDEX_MANIFEST_PATH, SPARSE_TOP_K
+from app.ingestion.chunker import Chunk
+from app.retrieval.tokenize import tokenize_technical_text
+
+BM25_INDEX_PATH = CHROMA_DIR.parent / "bm25_index.json"
 
 
 @dataclass
@@ -22,46 +21,66 @@ class SparseResult:
     text: str
     source_file: str
     heading_path: str
-    score: float   # raw BM25 score, unbounded, higher = more relevant
+    score: float
+
+
+def _resolve_index_path(explicit_path: str | Path | None) -> Path:
+    if explicit_path is not None:
+        return Path(explicit_path)
+    if INDEX_MANIFEST_PATH.exists():
+        try:
+            manifest = json.loads(INDEX_MANIFEST_PATH.read_text(encoding="utf-8"))
+            file_name = manifest["bm25_path"]
+            if not isinstance(file_name, str) or Path(file_name).name != file_name or not file_name.endswith(".json"):
+                raise ValueError("Invalid sparse index path in manifest.")
+            return INDEX_MANIFEST_PATH.parent / file_name
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError("The active index manifest is malformed. Rebuild the index.") from exc
+    return BM25_INDEX_PATH
 
 
 class SparseRetriever:
-    def __init__(self, bm25_path=None):
-        # See DenseRetriever's __init__ comment for why this is a
-        # constructor parameter rather than a module-attribute override.
-        with open(bm25_path or BM25_INDEX_PATH, "rb") as f:
-            data = pickle.load(f)
-        self.bm25 = data["bm25"]
-        self.chunks = data["chunks"]   # same order the BM25 index was built over
+    def __init__(self, bm25_path: str | Path | None = None):
+        index_path = _resolve_index_path(bm25_path)
+        try:
+            payload = json.loads(index_path.read_text(encoding="utf-8"))
+            if payload.get("format_version") != 1 or not isinstance(payload.get("documents"), list):
+                raise ValueError("Unsupported sparse index format. Rebuild the index.")
+            documents = payload["documents"]
+            chunks: list[Chunk] = []
+            tokenized: list[list[str]] = []
+            for item in documents:
+                chunk_data = item["chunk"]
+                tokens = item["tokens"]
+                if not isinstance(tokens, list) or not all(isinstance(token, str) for token in tokens):
+                    raise ValueError("The sparse index contains invalid tokens.")
+                chunks.append(Chunk(**chunk_data))
+                tokenized.append(tokens)
+            if not chunks or len(chunks) != len(tokenized):
+                raise ValueError("The sparse index is empty or inconsistent.")
+            if not any(tokenized):
+                raise ValueError("The sparse index contains no searchable tokens. Rebuild it from text documents.")
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Sparse index not found at {index_path}. Rebuild it with `python -m app.ingestion.indexer`."
+            ) from exc
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise ValueError("The sparse index is malformed. Rebuild it from trusted source files.") from exc
+
+        self.chunks = chunks
+        self.bm25 = BM25Okapi(tokenized)
 
     def search(self, query: str, top_k: int = SPARSE_TOP_K) -> list[SparseResult]:
-        # Must match the exact tokenization used at index time
-        # (indexer.py: c.text.lower().split()) or scores are meaningless.
-        tokenized_query = query.lower().split()
-        scores = self.bm25.get_scores(tokenized_query)
-
-        # Pair each chunk with its score, sort descending, take top_k
+        scores = self.bm25.get_scores(tokenize_technical_text(query))
         scored = list(zip(self.chunks, scores))
         scored.sort(key=lambda pair: pair[1], reverse=True)
-
-        out = []
-        for chunk, score in scored[:top_k]:
-            out.append(
-                SparseResult(
-                    chunk_id=chunk.chunk_id,
-                    text=chunk.text,
-                    source_file=chunk.source_file,
-                    heading_path=chunk.heading_path,
-                    score=float(score),
-                )
+        return [
+            SparseResult(
+                chunk_id=chunk.chunk_id,
+                text=chunk.text,
+                source_file=chunk.source_file,
+                heading_path=chunk.heading_path,
+                score=float(score),
             )
-        return out
-
-
-if __name__ == "__main__":
-    retriever = SparseRetriever()
-    query = "ResUNet Tversky loss segmentation"
-    print(f"Query: {query}\n")
-    for r in retriever.search(query, top_k=5):
-        print(f"[{r.score:.3f}] {r.source_file} | {r.heading_path}")
-        print(f"        {r.text[:100]}...")
+            for chunk, score in scored[:top_k]
+        ]
