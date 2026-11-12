@@ -17,9 +17,11 @@ if (configuredApiBase) {
     throw new Error("VITE_API_BASE_URL must be an absolute HTTP(S) origin.");
   }
   const localHttp = parsed.protocol === "http:" && ["localhost", "127.0.0.1"].includes(parsed.hostname);
+  const renderOrigin = parsed.protocol === "https:" &&
+    (parsed.hostname === "onrender.com" || parsed.hostname.endsWith(".onrender.com"));
   if ((parsed.protocol !== "https:" && !localHttp) || parsed.username || parsed.password ||
-      parsed.pathname !== "/" || parsed.search || parsed.hash) {
-    throw new Error("VITE_API_BASE_URL must be an HTTPS origin (HTTP is allowed only for localhost).");
+      parsed.pathname !== "/" || parsed.search || parsed.hash || (!localHttp && !renderOrigin)) {
+    throw new Error("VITE_API_BASE_URL must be an onrender.com HTTPS origin (HTTP is allowed only for localhost).");
   }
   apiBase = parsed.origin;
 }
