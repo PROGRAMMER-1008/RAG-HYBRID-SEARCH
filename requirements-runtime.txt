@@ -21,7 +21,7 @@ fastembed==0.9.1
 rank-bm25==0.2.2
 
 # LLM providers
-ollama==0.3.3
+ollama==0.6.3
 groq==1.7.0
 
 # Utilities
