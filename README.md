@@ -68,7 +68,7 @@ The repository is prepared for a static Vercel frontend and a Docker-based Rende
 
 ### Vercel
 
-Create a Vercel project from this repository and set its **Root Directory** to `web`. The build command (`npm run build`) and output directory (`dist`) are also declared in `web/vercel.json`. Configure the production environment variable `VITE_API_BASE_URL` as the public Render API URL, for example `https://rag-hybrid-search-api.onrender.com`. It must use the assigned `*.onrender.com` hostname (or localhost for development). Redeploy after changing it because the value is embedded at build time. The Vercel project must use a stable production domain; update the Render service's `CORS_ORIGINS` if that domain differs from the default in `render.yaml`.
+Create a Vercel project from this repository. You can deploy the repository root (`.`), which uses the root `vercel.json` to build and publish `web/`, or set **Root Directory** to `web`, which uses `web/vercel.json`. Configure the production environment variable `VITE_API_BASE_URL` as the public Render API URL, for example `https://rag-hybrid-search-api.onrender.com`. It must use the assigned `*.onrender.com` hostname (or localhost for development). Redeploy after changing it because the value is embedded at build time. The Vercel project must use a stable production domain; update the Render service's `CORS_ORIGINS` if that domain differs from the default in `render.yaml`.
 
 The static project uses security headers from `web/vercel.json`. The frontend can also be served by Render at the API origin.
 
