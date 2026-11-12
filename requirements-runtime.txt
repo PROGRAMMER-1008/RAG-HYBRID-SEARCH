@@ -26,5 +26,5 @@ groq==1.7.0
 
 # Utilities
 python-dotenv==1.0.1
-tqdm==4.66.5
+tqdm==4.70.1
 numpy==1.26.4
