@@ -38,7 +38,15 @@ function showToast(message) {
 
 async function api(path, options = {}) {
   if (!API_BASE) throw new Error("The API address is not configured. Set VITE_API_BASE_URL in the Vercel project.");
-  const response = await fetch(`${API_BASE}${path}`, options);
+  setStatus("connecting", "Connecting");
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, options);
+  } catch (error) {
+    setStatus("offline", "API unavailable");
+    throw error;
+  }
+  setStatus("online", "API ready");
   const contentType = response.headers.get("content-type") || "";
   const payload = contentType.includes("application/json") ? await response.json() : null;
   if (!response.ok) {
@@ -217,7 +225,7 @@ async function uploadFiles(files) {
   }
   setInteractionBusy(true);
   uploadProgress.hidden = false;
-  uploadStatus.textContent = "Waking the API and preparing your private workspace…";
+  uploadStatus.textContent = "Waking the free API and preparing your private workspace. After idle, the first request can take a minute or two; keep this tab open and your files will upload when it responds.";
   dropzone.setAttribute("aria-busy", "true");
   try {
     await ensureWorkspace();
@@ -463,8 +471,8 @@ async function askQuestion(event) {
   setInteractionBusy(true);
   answerProgress.hidden = false;
   answerProgressText.textContent = mode === "documents"
-    ? "Searching your documents, writing an evidence-based answer, and checking citations…"
-    : "Sending your question to the AI provider. Your files and the web are not being searched…";
+    ? "Searching your documents, writing an evidence-based answer, and checking citations. The free API can take a minute or two to wake after idle; keep this tab open."
+    : "Sending your question to the AI provider without searching files or the web. The free API can take a minute or two to wake after idle; keep this tab open.";
   askButton.querySelector("span").textContent = mode === "documents" ? "Searching…" : "Answering…";
   try {
     await ensureWorkspace();
