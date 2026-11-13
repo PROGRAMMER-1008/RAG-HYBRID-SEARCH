@@ -7,7 +7,7 @@ const API_BASE = (() => {
 
 const WORKSPACE_ID_KEY = "rag-workspace-id";
 const WORKSPACE_TOKEN_KEY = "rag-workspace-token";
-const state = { workspaceId: "", token: "", documents: [], formats: null, busy: false };
+const state = { workspaceId: "", token: "", documents: [], chunkCount: 0, formats: null, busy: false };
 const $ = (selector) => document.querySelector(selector);
 
 const apiStatus = $("#apiStatus");
@@ -15,10 +15,13 @@ const fileInput = $("#fileInput");
 const dropzone = $("#dropzone");
 const uploadProgress = $("#uploadProgress");
 const uploadStatus = $("#uploadStatus");
+const uploadSummary = $("#uploadSummary");
 const uploadError = $("#uploadError");
 const askForm = $("#askForm");
 const questionInput = $("#question");
 const askButton = $("#askButton");
+const answerProgress = $("#answerProgress");
+const answerProgressText = $("#answerProgressText");
 const askError = $("#askError");
 const toast = $("#toast");
 
@@ -40,12 +43,15 @@ async function api(path, options = {}) {
   const payload = contentType.includes("application/json") ? await response.json() : null;
   if (!response.ok) {
     const detail = payload?.detail;
-    if (typeof detail === "string") throw new Error(detail);
+    let message;
+    if (typeof detail === "string") message = detail;
     if (detail?.message) {
       const failures = (detail.errors || []).map((item) => `${item.filename}: ${item.error}`).join("\n");
-      throw new Error([detail.message, failures].filter(Boolean).join("\n"));
+      message = [detail.message, failures].filter(Boolean).join("\n");
     }
-    throw new Error(`Request failed (${response.status}).`);
+    const error = new Error(message || `Request failed (${response.status}).`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -65,6 +71,7 @@ function clearSession() {
   state.workspaceId = "";
   state.token = "";
   state.documents = [];
+  state.chunkCount = 0;
   renderDocuments();
 }
 
@@ -81,6 +88,22 @@ function showError(element, message) {
   element.hidden = !message;
 }
 
+function showUploadSummary(message, kind = "success") {
+  uploadSummary.textContent = message;
+  uploadSummary.className = `upload-summary ${kind}`;
+  uploadSummary.hidden = !message;
+}
+
+function setInteractionBusy(busy) {
+  state.busy = busy;
+  askButton.disabled = busy;
+  $("#newWorkspace").disabled = busy;
+  fileInput.disabled = busy;
+  $("#folderInput").disabled = busy;
+  questionInput.disabled = busy;
+  document.querySelectorAll('input[name="answerMode"]').forEach((input) => { input.disabled = busy; });
+}
+
 function formatSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -91,21 +114,22 @@ function renderDocuments() {
   const list = $("#fileList");
   list.replaceChildren();
   $("#documentCount").textContent = String(state.documents.length);
-  for (const document of state.documents) {
+  $("#emptyDocuments").hidden = state.documents.length > 0;
+  for (const doc of state.documents) {
     const item = document.createElement("li");
     item.className = "file-item";
     const icon = document.createElement("span");
     icon.className = "file-icon";
-    icon.textContent = document.filename.split(".").pop()?.slice(0, 4) || "FILE";
+    icon.textContent = doc.filename.split(".").pop()?.slice(0, 4) || "FILE";
     icon.setAttribute("aria-hidden", "true");
     const meta = document.createElement("span");
     meta.className = "file-meta";
     const name = document.createElement("span");
     name.className = "file-name";
-    name.textContent = document.filename;
+    name.textContent = doc.filename;
     const size = document.createElement("span");
     size.className = "file-size";
-    size.textContent = formatSize(document.size_bytes);
+    size.textContent = `${formatSize(doc.size_bytes)} · indexed`;
     meta.append(name, size);
     item.append(icon, meta);
     list.append(item);
@@ -119,9 +143,19 @@ async function loadDocuments() {
       headers: authHeaders(),
     });
     state.documents = result.documents || [];
+    state.chunkCount = result.chunk_count || 0;
     renderDocuments();
-  } catch {
-    clearSession();
+    if (state.documents.length) {
+      showUploadSummary(`Workspace restored · ${state.documents.length} document${state.documents.length === 1 ? "" : "s"} indexed · ${state.chunkCount} searchable passage${state.chunkCount === 1 ? "" : "s"} ready.`, "success");
+    }
+  } catch (error) {
+    if (error.status === 401 || error.status === 404) {
+      clearSession();
+      showUploadSummary("This temporary workspace expired. Upload your files again to continue.", "warning");
+    } else {
+      showUploadSummary("Could not restore this workspace yet. Your session has been kept; try again after the API reconnects.", "warning");
+      showError(uploadError, error.message);
+    }
   }
 }
 
@@ -145,39 +179,75 @@ async function initialize() {
 async function uploadFiles(files) {
   if (!files.length || state.busy) return;
   showError(uploadError, "");
+  showUploadSummary("");
   if (!state.formats) {
     showError(uploadError, "The backend is unavailable. Try again after it is online.");
+    showUploadSummary("Upload could not start because the API is not ready. Wait for the API status to turn green, then try again.", "error");
+    fileInput.value = "";
+    $("#folderInput").value = "";
     return;
   }
-  const maxFile = state.formats.limits.per_file_bytes;
-  const tooLarge = files.filter((file) => file.size > maxFile);
-  if (tooLarge.length) {
-    showError(uploadError, `${tooLarge.map((file) => file.name).join(", ")} exceed the ${formatSize(maxFile)} file limit.`);
+  const limits = state.formats.limits;
+  const currentBytes = state.documents.reduce((total, doc) => total + (doc.size_bytes || 0), 0);
+  const filesToUpload = [];
+  const localRejections = [];
+  let reservedBytes = currentBytes;
+  let reservedFiles = state.documents.length;
+  for (const file of files) {
+    const filename = file.webkitRelativePath || file.name;
+    if (file.size > limits.per_file_bytes) {
+      localRejections.push(`${filename}: exceeds the ${formatSize(limits.per_file_bytes)} per-file limit.`);
+    } else if (reservedFiles >= limits.files_per_workspace) {
+      localRejections.push(`${filename}: the workspace file limit (${limits.files_per_workspace}) has been reached.`);
+    } else if (reservedBytes + file.size > limits.per_workspace_bytes) {
+      localRejections.push(`${filename}: exceeds the ${formatSize(limits.per_workspace_bytes)} workspace total.`);
+    } else {
+      filesToUpload.push(file);
+      reservedBytes += file.size;
+      reservedFiles += 1;
+    }
+  }
+  if (!filesToUpload.length) {
+    const message = localRejections.length ? localRejections.join("\n") : "No files were selected.";
+    showError(uploadError, message);
+    showUploadSummary(`No files were added. ${localRejections.length} file${localRejections.length === 1 ? " was" : "s were"} outside the current workspace limits.`, "error");
+    fileInput.value = "";
+    $("#folderInput").value = "";
     return;
   }
-  state.busy = true;
+  setInteractionBusy(true);
   uploadProgress.hidden = false;
-  uploadStatus.textContent = "Preparing a private workspace…";
+  uploadStatus.textContent = "Waking the API and preparing your private workspace…";
   dropzone.setAttribute("aria-busy", "true");
   try {
     await ensureWorkspace();
     const form = new FormData();
-    for (const file of files) form.append("files", file, file.webkitRelativePath || file.name);
-    uploadStatus.textContent = `Extracting text from ${files.length} file${files.length === 1 ? "" : "s"}…`;
+    for (const file of filesToUpload) form.append("files", file, file.webkitRelativePath || file.name);
+    uploadStatus.textContent = `Uploading ${filesToUpload.length} file${filesToUpload.length === 1 ? "" : "s"} and building the search index…`;
+    const previousCount = state.documents.length;
     const result = await api(`/v1/workspaces/${encodeURIComponent(state.workspaceId)}/documents`, {
       method: "POST",
       headers: authHeaders(),
       body: form,
     });
     state.documents = result.documents || [];
+    state.chunkCount = result.chunk_count || 0;
     renderDocuments();
-    const rejected = (result.errors || []).map((item) => `${item.filename}: ${item.error}`);
-    showError(uploadError, rejected.join("\n"));
-    showToast(`${files.length - rejected.length} file(s) added · ${result.chunk_count} searchable passages`);
+    const serverRejections = (result.errors || []).map((item) => `${item.filename}: ${item.error}`);
+    const rejections = [...localRejections, ...serverRejections];
+    const addedCount = Math.max(0, state.documents.length - previousCount);
+    showError(uploadError, rejections.join("\n"));
+    if (addedCount) {
+      const partial = rejections.length ? " Some selected files were skipped; see the details above." : "";
+      showUploadSummary(`Upload complete · ${addedCount} new document${addedCount === 1 ? "" : "s"} indexed · ${state.chunkCount} searchable passage${state.chunkCount === 1 ? "" : "s"} ready. Ask a question in Grounded mode.${partial}`, rejections.length ? "warning" : "success");
+    } else {
+      showUploadSummary("No new documents were added. Check the details above, then choose different files.", "warning");
+    }
   } catch (error) {
     showError(uploadError, error.message);
+    showUploadSummary("Upload did not finish. Your existing documents are still in this workspace; check the error and try again.", "error");
   } finally {
-    state.busy = false;
+    setInteractionBusy(false);
     uploadProgress.hidden = true;
     dropzone.removeAttribute("aria-busy");
     fileInput.value = "";
@@ -291,23 +361,72 @@ function renderTrace(stages) {
 function renderMetrics(result) {
   const metrics = $("#answerMetrics");
   metrics.replaceChildren();
-  if (result.citation_accuracy !== null && result.citation_verification_available) {
-    const accuracy = document.createElement("span");
-    accuracy.className = "metric-chip";
-    accuracy.textContent = `Citation check · ${Math.round(result.citation_accuracy * 100)}% supported`;
-    metrics.append(accuracy);
-  } else if (result.mode === "documents") {
-    const unavailable = document.createElement("span");
-    unavailable.className = "metric-chip";
-    unavailable.textContent = "Citation verification unavailable";
-    metrics.append(unavailable);
+  const addMetric = (label) => {
+    const chip = document.createElement("span");
+    chip.className = "metric-chip";
+    chip.textContent = label;
+    metrics.append(chip);
+  };
+  if (result.mode === "general") {
+    addMetric("No document sources used");
+    return;
   }
-  if (result.retrieval_score !== null && result.retrieval_score !== undefined) {
-    const score = document.createElement("span");
-    score.className = "metric-chip";
-    score.textContent = `Top passage score · ${Number(result.retrieval_score).toFixed(4)} (not a probability)`;
-    metrics.append(score);
+  const citations = result.citations || [];
+  addMetric(citations.length ? `${citations.length} source passage${citations.length === 1 ? "" : "s"} shown` : "No supporting passages found");
+  if (result.citation_verification_available && result.citation_accuracy !== null) {
+    addMetric(`Citation check · ${Math.round(result.citation_accuracy * 100)}% of cited passages supported`);
+  } else {
+    addMetric(result.notice?.toLowerCase().includes("skipped")
+      ? "Automated citation check skipped"
+      : "Automated citation check unavailable");
   }
+}
+
+function renderAnswerMethod(result) {
+  const summary = $("#methodSummary");
+  const steps = $("#methodSteps");
+  steps.replaceChildren();
+  const method = result.mode === "general"
+    ? {
+        summary: "General AI answers directly from the question. It does not search your documents or the live web.",
+        steps: [
+          ["Question", "Your prompt is sent to the configured AI provider."],
+          ["Answer", "The model returns a general response without document citations or web verification."],
+        ],
+      }
+    : {
+        summary: result.grounded
+          ? "Grounded mode searches your files first and returns an answer linked to the passages it used."
+          : "The app did not return a grounded answer because the retrieved material did not support one safely.",
+        steps: [
+          ["Search", "Meaning-based search and keyword search find candidate passages in your uploaded files."],
+          ["Rank", "Reciprocal rank fusion combines both result lists into one evidence ranking."],
+          ["Answer", result.grounded
+            ? "The AI writes from the retrieved passages and attaches source markers to factual claims."
+            : "When the passages are insufficient or a claim cannot be supported, the app withholds the answer."],
+          ["Check", result.citation_verification_available
+            ? "A separate citation check compares cited claims with their source passages."
+            : result.citations?.length
+              ? "Automated citation checking was unavailable for this answer; review the source passages below."
+              : "No source passages were available to check against the question."],
+        ],
+      };
+  summary.textContent = method.summary;
+  for (const [title, description] of method.steps) {
+    const item = document.createElement("li");
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const detail = document.createElement("span");
+    detail.textContent = description;
+    item.append(heading, detail);
+    steps.append(item);
+  }
+}
+
+function updateModeExplanation() {
+  $("#modeExplanation").textContent = selectedMode() === "documents"
+    ? "Searches your uploaded files and shows the passages used. If the files do not support an answer, the app says so instead of guessing."
+    : "Sends your question to the AI provider without searching your files or the live web. The answer will not have document citations.";
 }
 
 async function askQuestion(event) {
@@ -321,9 +440,13 @@ async function askQuestion(event) {
     return;
   }
   showError(askError, "");
-  state.busy = true;
-  askButton.disabled = true;
-  askButton.querySelector("span").textContent = "Thinking…";
+  $("#answerArea").hidden = true;
+  setInteractionBusy(true);
+  answerProgress.hidden = false;
+  answerProgressText.textContent = mode === "documents"
+    ? "Searching your documents, writing an evidence-based answer, and checking citations…"
+    : "Sending your question to the AI provider. Your files and the web are not being searched…";
+  askButton.querySelector("span").textContent = mode === "documents" ? "Searching…" : "Answering…";
   try {
     await ensureWorkspace();
     const result = await api(`/v1/workspaces/${encodeURIComponent(state.workspaceId)}/ask`, {
@@ -332,24 +455,28 @@ async function askQuestion(event) {
       body: JSON.stringify({ question, mode }),
     });
     $("#answerArea").hidden = false;
+    $("#answeredQuestion").textContent = question;
     const notice = $("#answerNotice");
     notice.textContent = result.notice;
-    notice.className = `answer-notice ${result.mode === "general" ? "general" : ""}`;
+    notice.className = `answer-notice ${result.mode === "general" ? "general" : result.grounded ? "grounded" : "withheld"}`;
     renderAnswerText(result.answer, result.mode === "documents");
     renderEvidence(result.citations);
     renderMetrics(result);
+    renderAnswerMethod(result);
     renderTrace(result.pipeline_stages);
     $("#answerArea").scrollIntoView({ behavior: "smooth", block: "start" });
   } catch (error) {
     showError(askError, error.message);
   } finally {
-    state.busy = false;
-    askButton.disabled = false;
+    setInteractionBusy(false);
+    answerProgress.hidden = true;
     askButton.querySelector("span").textContent = "Ask";
   }
 }
 
 async function deleteWorkspace() {
+  if (state.busy) return;
+  setInteractionBusy(true);
   if (state.workspaceId && state.token) {
     try {
       await api(`/v1/workspaces/${encodeURIComponent(state.workspaceId)}`, {
@@ -364,6 +491,8 @@ async function deleteWorkspace() {
   $("#answerArea").hidden = true;
   showError(uploadError, "");
   showError(askError, "");
+  showUploadSummary("");
+  setInteractionBusy(false);
   showToast("Workspace cleared from this session.");
 }
 
@@ -386,6 +515,7 @@ document.querySelectorAll('input[name="answerMode"]').forEach((input) => {
   input.addEventListener("change", () => {
     document.querySelectorAll(".mode-option").forEach((item) => item.classList.remove("selected"));
     input.closest(".mode-option").classList.add("selected");
+    updateModeExplanation();
   });
 });
 for (const eventName of ["dragenter", "dragover"]) {

@@ -56,7 +56,9 @@
             <div class="upload-progress" id="uploadProgress" hidden>
               <span class="spinner" aria-hidden="true"></span><span id="uploadStatus">Reading files…</span>
             </div>
+            <p class="upload-summary" id="uploadSummary" role="status" aria-live="polite" hidden></p>
             <p class="inline-error" id="uploadError" role="alert" hidden></p>
+            <p class="empty-documents" id="emptyDocuments">No files yet. Add documents to build a searchable workspace.</p>
             <ul class="file-list" id="fileList" aria-label="Uploaded documents"></ul>
             <div class="privacy-note">
               <span aria-hidden="true">◷</span>
@@ -76,13 +78,14 @@
             <div class="mode-picker" role="group" aria-label="Answer mode">
               <label class="mode-option selected" id="documentsModeLabel">
                 <input type="radio" name="answerMode" value="documents" checked />
-                <span><strong>Use my documents</strong><small>Grounded answer with evidence</small></span>
+                <span><strong>Grounded in my documents</strong><small>Search files, cite passages, withhold unsupported answers</small></span>
               </label>
               <label class="mode-option" id="generalModeLabel">
                 <input type="radio" name="answerMode" value="general" />
-                <span><strong>General AI</strong><small>Not checked against your files or the web</small></span>
+                <span><strong>General AI</strong><small>Uses AI knowledge; does not search files or the live web</small></span>
               </label>
             </div>
+            <p class="mode-explanation" id="modeExplanation" aria-live="polite">Searches your uploaded files and shows the passages used. If the files do not support an answer, the app says so instead of guessing.</p>
 
             <form id="askForm">
               <label class="sr-only" for="question">Your question</label>
@@ -95,21 +98,35 @@
               </div>
             </form>
             <p class="error-banner" id="askError" role="alert" hidden></p>
+            <div class="answer-progress" id="answerProgress" role="status" aria-live="polite" hidden>
+              <span class="spinner" aria-hidden="true"></span><span id="answerProgressText"></span>
+            </div>
 
             <div class="answer-area" id="answerArea" hidden aria-live="polite">
               <div class="answer-heading">
-                <div><p class="eyebrow">03 · Answer</p><h3>Response</h3></div>
+                <div><p class="eyebrow">03 · Result</p><h3>Answer to your question</h3></div>
                 <button class="button button-quiet copy-button" id="copyAnswer" type="button">Copy</button>
               </div>
-              <div class="answer-notice" id="answerNotice"></div>
-              <div class="answer-text" id="answerText"></div>
+              <div class="answer-card">
+                <p class="answered-question"><span>Question</span><span id="answeredQuestion"></span></p>
+                <div class="answer-notice" id="answerNotice"></div>
+                <div class="answer-text" id="answerText"></div>
+              </div>
               <div class="answer-metrics" id="answerMetrics"></div>
+              <section class="answer-method" aria-labelledby="methodTitle">
+                <p class="eyebrow">How the result was made</p>
+                <h4 id="methodTitle">Answer process</h4>
+                <p class="method-summary" id="methodSummary"></p>
+                <ol class="method-steps" id="methodSteps"></ol>
+              </section>
               <section class="evidence-section" id="evidenceSection" hidden aria-labelledby="evidenceTitle">
-                <div class="answer-heading"><div><p class="eyebrow">04 · Source passages</p><h3 id="evidenceTitle">Check the evidence</h3></div></div>
+                <div class="answer-heading"><div><p class="eyebrow">04 · Source passages</p><h3 id="evidenceTitle">Evidence behind this answer</h3></div></div>
+                <p class="evidence-help">Green outlined passages were cited. Click a citation such as [1] in the answer to jump to its source.</p>
                 <div class="evidence-list" id="evidenceList"></div>
               </section>
               <details class="trace-details" id="traceDetails" hidden>
-                <summary>See how retrieval ranked your files</summary>
+                <summary>Advanced retrieval diagnostics</summary>
+                <p class="trace-help">Dense search compares meaning, BM25 compares important words, and reciprocal rank fusion combines their rankings. Scores rank passages; they are not answer confidence or probabilities.</p>
                 <div class="trace-grid" id="traceGrid"></div>
               </details>
             </div>
