@@ -288,6 +288,10 @@ function renderEvidence(citations) {
   const list = $("#evidenceList");
   list.replaceChildren();
   section.hidden = !citations?.length;
+  const citedCount = (citations || []).filter((citation) => citation.was_cited).length;
+  $("#evidenceHelp").textContent = citedCount
+    ? "Green outlined passages were cited in the answer. Other passages were retrieved candidates only. Click a citation such as [1] to jump to its source."
+    : "These passages were retrieved for your question, but none was cited in a verifiable answer. The app shows them so you can inspect what it searched.";
   for (const citation of citations || []) {
     const card = document.createElement("article");
     card.className = `evidence-card ${citation.was_cited ? "cited" : ""}`;
@@ -372,10 +376,17 @@ function renderMetrics(result) {
     return;
   }
   const citations = result.citations || [];
-  addMetric(citations.length ? `${citations.length} source passage${citations.length === 1 ? "" : "s"} shown` : "No supporting passages found");
+  const citedCount = citations.filter((citation) => citation.was_cited).length;
+  if (result.grounded && citedCount) {
+    addMetric(`Answer cites ${citedCount} of ${citations.length} retrieved passage${citations.length === 1 ? "" : "s"}`);
+  } else if (citations.length) {
+    addMetric(`${citations.length} passage${citations.length === 1 ? "" : "s"} retrieved · no grounded answer returned`);
+  } else {
+    addMetric("No relevant passages found");
+  }
   if (result.citation_verification_available && result.citation_accuracy !== null) {
     addMetric(`Citation check · ${Math.round(result.citation_accuracy * 100)}% of cited passages supported`);
-  } else {
+  } else if (result.grounded) {
     addMetric(result.notice?.toLowerCase().includes("skipped")
       ? "Automated citation check skipped"
       : "Automated citation check unavailable");
@@ -397,18 +408,26 @@ function renderAnswerMethod(result) {
     : {
         summary: result.grounded
           ? "Grounded mode searches your files first and returns an answer linked to the passages it used."
-          : "The app did not return a grounded answer because the retrieved material did not support one safely.",
+          : result.citations?.length
+            ? "Likely passages were retrieved, but the AI did not provide a verifiable answer from them. The app withheld the answer instead of guessing."
+            : "No relevant passages were found in your files, so the app withheld an answer instead of guessing.",
         steps: [
           ["Search", "Meaning-based search and keyword search find candidate passages in your uploaded files."],
-          ["Rank", "Reciprocal rank fusion combines both result lists into one evidence ranking."],
+          ["Rank", result.citations?.length
+            ? `Reciprocal rank fusion combined the results; ${result.citations.length} passage${result.citations.length === 1 ? " was" : "s were"} retrieved for review.`
+            : "The search did not find a passage relevant enough to answer safely."],
           ["Answer", result.grounded
             ? "The AI writes from the retrieved passages and attaches source markers to factual claims."
             : "When the passages are insufficient or a claim cannot be supported, the app withholds the answer."],
           ["Check", result.citation_verification_available
-            ? "A separate citation check compares cited claims with their source passages."
-            : result.citations?.length
+            ? result.grounded
+              ? "A separate citation check compares cited claims with their source passages."
+              : "The citation checker found an unsupported claim, so the answer was withheld."
+            : result.grounded
               ? "Automated citation checking was unavailable for this answer; review the source passages below."
-              : "No source passages were available to check against the question."],
+              : result.citations?.length
+                ? "No citation check ran because the AI draft did not contain valid source markers."
+                : "No retrieved source passages were available to check."],
         ],
       };
   summary.textContent = method.summary;
